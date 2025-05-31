@@ -1,25 +1,30 @@
-use crate::cicularBuffer::CircularBuffer;
 use crate::handler::handle_client;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::sync::{broadcast, Mutex};
+use crate::partitionManager::PartitionManager;
+
+use std::sync::{atomic::AtomicUsize, Arc};
+use tokio::sync::broadcast;
+use tokio::{net::TcpListener, sync::Mutex};
 
 pub async fn start_server() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:9000").await?;
     println!("Listening on 127.0.0.1:9000");
 
     let (tx, _rx) = broadcast::channel::<String>(100);
-    let buffer = Arc::new(Mutex::new(CircularBuffer::new(100)));
+    //by default we providing 2 partitions
+    let partition_manager = Arc::new(Mutex::new(PartitionManager::new(2, 100)));
+
+    let rr_counter = Arc::new(AtomicUsize::new(0));
 
     loop {
         let (stream, addr) = listener.accept().await?;
         println!("Connected: {}", addr);
 
         let tx = tx.clone();
-        let buffer = buffer.clone();
+        let partition_manager = partition_manager.clone();
+        let rr_counter = rr_counter.clone();
 
         tokio::spawn(async move {
-            handle_client(stream, tx, buffer).await;
+            handle_client(stream, tx, partition_manager, rr_counter).await;
         });
     }
 }

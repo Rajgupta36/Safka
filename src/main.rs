@@ -1,5 +1,7 @@
-mod cicularBuffer;
+mod circularBuffer;
+mod deserializer;
 mod handler;
+mod partitionManager;
 mod server;
 
 #[tokio::main]

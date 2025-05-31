@@ -1,4 +1,6 @@
-use crate::cicularBuffer::CircularBuffer;
+use crate::deserializer::IncomingMessage;
+use crate::partitionManager::PartitionManager;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -7,15 +9,14 @@ use tokio::sync::{broadcast, Mutex};
 pub async fn handle_client(
     mut stream: TcpStream,
     tx: broadcast::Sender<String>,
-    buffer: Arc<Mutex<CircularBuffer>>,
+    partition_manager: Arc<Mutex<PartitionManager>>,
+    rr_counter: Arc<AtomicUsize>,
 ) {
     let mut role_buf = [0u8; 1024];
     let n = stream.read(&mut role_buf).await.unwrap_or(0);
     let role = String::from_utf8_lossy(&role_buf[..n])
         .trim()
         .to_lowercase();
-
-    let mut rx = tx.subscribe();
 
     match role.as_str() {
         "producer" => {
@@ -24,29 +25,55 @@ pub async fn handle_client(
                 if n == 0 {
                     break;
                 }
-                let msg = String::from_utf8_lossy(&buf[..n]).to_string();
-                {
-                    let mut buf_lock = buffer.lock().await;
-                    buf_lock.push(msg.clone());
+                let parsed = serde_json::from_slice::<IncomingMessage>(&buf[..n]);
+                let total_partitions = partition_manager.lock().await.total_partitions();
+                match parsed {
+                    Ok(msg) => {
+                        let partition_id = msg.partitionId.unwrap_or_else(|| {
+                            let id = rr_counter.fetch_add(1, Ordering::SeqCst) % total_partitions;
+                            id
+                        });
+                        println!("current assigned partition is {}", partition_id);
+                        let partition = partition_manager.lock().await.get_partition(partition_id);
+
+                        if partition.is_none() {
+                            let _ = stream
+                                .write_all(
+                                    format!("Partition {} does not exist\n", partition_id)
+                                        .as_bytes(),
+                                )
+                                .await;
+                            continue;
+                        }
+
+                        partition
+                            .as_ref()
+                            .unwrap()
+                            .lock()
+                            .unwrap()
+                            .push(msg.message.clone());
+                        println!(
+                            "circular buffer is {:?}",
+                            partition.as_ref().unwrap().lock().unwrap().get_all()
+                        );
+                        let _ = stream
+                            .write_all(
+                                format!("Message added to partition {}\n", partition_id).as_bytes(),
+                            )
+                            .await;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse message: {:?}", e);
+                        let _ = stream
+                            .write_all(b"Please provide the data in correct format\n")
+                            .await;
+                        continue;
+                    }
                 }
-                let _ = tx.send(msg);
             }
         }
         "consumer" => {
-            let previous_msgs = {
-                let buf_lock = buffer.lock().await;
-                buf_lock.get_all()
-            };
-
-            for msg in previous_msgs {
-                let _ = stream.write_all(msg.as_bytes()).await;
-                let _ = stream.write_all(b"\n").await;
-            }
-
-            while let Ok(msg) = rx.recv().await {
-                let _ = stream.write_all(msg.as_bytes()).await;
-                let _ = stream.write_all(b"\n").await;
-            }
+            print!("hiii consumer\n");
         }
         _ => {
             let _ = stream.write_all(b"Invalid role\n").await;
