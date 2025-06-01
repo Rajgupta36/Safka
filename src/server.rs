@@ -1,3 +1,4 @@
+use crate::groups::ConsumerGroupManager;
 use crate::handler::handle_client;
 use crate::partitionManager::PartitionManager;
 
@@ -12,6 +13,7 @@ pub async fn start_server() -> anyhow::Result<()> {
     let (tx, _rx) = broadcast::channel::<String>(100);
     //by default we providing 2 partitions
     let partition_manager = Arc::new(Mutex::new(PartitionManager::new(2, 100)));
+    let consumer_group_manager = Arc::new(Mutex::new(ConsumerGroupManager::new()));
 
     let rr_counter = Arc::new(AtomicUsize::new(0));
 
@@ -21,10 +23,18 @@ pub async fn start_server() -> anyhow::Result<()> {
 
         let tx = tx.clone();
         let partition_manager = partition_manager.clone();
+        let consumer_group_manager = consumer_group_manager.clone();
         let rr_counter = rr_counter.clone();
 
         tokio::spawn(async move {
-            handle_client(stream, tx, partition_manager, rr_counter).await;
+            handle_client(
+                stream,
+                tx,
+                partition_manager,
+                rr_counter,
+                consumer_group_manager,
+            )
+            .await;
         });
     }
 }
