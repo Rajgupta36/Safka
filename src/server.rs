@@ -13,7 +13,9 @@ pub async fn start_server() -> anyhow::Result<()> {
     let (tx, _rx) = broadcast::channel::<String>(100);
     //by default we providing 2 partitions
     let partition_manager = Arc::new(Mutex::new(PartitionManager::new(2, 100)));
-    let consumer_group_manager = Arc::new(Mutex::new(ConsumerGroupManager::new()));
+    let consumer_group_manager = Arc::new(Mutex::new(ConsumerGroupManager::new(
+        partition_manager.lock().await.total_partitions(),
+    )));
 
     let rr_counter = Arc::new(AtomicUsize::new(0));
 

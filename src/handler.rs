@@ -86,7 +86,7 @@ pub async fn handle_client(
 
             if parts.len() < 2 {
                 let _ = stream
-                    .write_all(b"Invalid format. Use group_id:consumer_id[:start_from_latest]\n")
+                    .write_all(b"Invalid format. Use group_id:consumer_id[:offset]\n")
                     .await;
                 return;
             }
@@ -95,54 +95,70 @@ pub async fn handle_client(
             let consumer_id = parts[1];
             let start_from_latest = parts.get(2).map(|v| *v == "true").unwrap_or(false);
 
-            // partition 0 for now
-            let partition_id = 0;
-            //lock cg and pm
+            // Join group and rebalance
             let mut cg_lock = consumer_group_manager.lock().await;
-            let mut pm_lock = partition_manager.lock().await;
-            let buffer = pm_lock.get_partition(partition_id);
 
-            if buffer.is_none() {
+            if let Err(err_msg) = cg_lock.join_group(group_id, consumer_id.to_string()) {
                 let _ = stream
-                    .write_all(format!("Partition {} does not exist\n", partition_id).as_bytes())
+                    .write_all(format!("Error: {}\n", err_msg).as_bytes())
                     .await;
+                return; // closes connection
+            }
+
+            let assigned_partitions = cg_lock.get_assignments(group_id, consumer_id);
+            drop(cg_lock); // drop lock early
+
+            if assigned_partitions.is_empty() {
+                let _ = stream.write_all(b"No partitions assigned\n").await;
                 return;
             }
 
-            let buffer = buffer.unwrap();
-
-            // Register consumer
-            cg_lock.join_group(group_id, consumer_id.to_string());
-
-            let current_len = buffer.lock().unwrap().get_all().len();
-            let offset =
-                cg_lock.get_or_init_offset(group_id, partition_id, start_from_latest, current_len);
-
-            // Drop locking
-            drop(cg_lock);
-            drop(pm_lock);
-
-            let mut current_offset = offset;
+            println!(
+                "Consumer {} assigned to partitions {:?}",
+                consumer_id, assigned_partitions
+            );
 
             loop {
-                let msgs = buffer.lock().unwrap().get_all();
-                if current_offset < msgs.len() {
-                    let msg = &msgs[current_offset];
-                    if stream
-                        .write_all(format!("{}\n", msg).as_bytes())
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
+                let mut messages_found = false;
 
-                    // Update offset after sending
+                for &partition_id in &assigned_partitions {
+                    let pm = partition_manager.lock().await;
+                    let buffer = match pm.get_partition(partition_id) {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    drop(pm);
+
+                    let current_len = buffer.lock().unwrap().get_all().len();
+
                     let mut cg = consumer_group_manager.lock().await;
-                    cg.commit_offset(group_id, partition_id, current_offset + 1);
+                    let offset = cg.get_or_init_offset(
+                        group_id,
+                        partition_id,
+                        start_from_latest,
+                        current_len,
+                    );
                     drop(cg);
 
-                    current_offset += 1;
-                } else {
+                    let msgs = buffer.lock().unwrap().get_all();
+                    if offset < msgs.len() {
+                        messages_found = true;
+                        let msg = &msgs[offset];
+                        if stream
+                            .write_all(format!("[partition {}] {}\n", partition_id, msg).as_bytes())
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+
+                        let mut cg = consumer_group_manager.lock().await;
+                        cg.commit_offset(group_id, partition_id, offset + 1);
+                        drop(cg);
+                    }
+                }
+
+                if !messages_found {
                     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                 }
             }
