@@ -86,7 +86,7 @@ pub async fn handle_client(
 
             if parts.len() < 2 {
                 let _ = stream
-                    .write_all(b"Invalid format. Use group_id:consumer_id[:offset]\n")
+                    .write_all(b"Invalid format. Use group_id:consumer_id:offset\n")
                     .await;
                 return;
             }

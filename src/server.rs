@@ -7,8 +7,8 @@ use tokio::sync::broadcast;
 use tokio::{net::TcpListener, sync::Mutex};
 
 pub async fn start_server() -> anyhow::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:9000").await?;
-    println!("Listening on 127.0.0.1:9000");
+    let listener = TcpListener::bind("0.0.0.0:9000").await?;
+    println!("Listening on 0.0.0.0:9000");
 
     let (tx, _rx) = broadcast::channel::<String>(100);
     //by default we providing 2 partitions
