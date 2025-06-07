@@ -2,7 +2,7 @@
 
 **Safka** (short for *Sasta Kafka*) is a lightweight, high-performance message broker inspired by Apache Kafka, built from scratch in **Rust** using the **Tokio** asynchronous runtime.
 
-This project is developed to understand and explore the internals of distributed messaging systems like Kafka — including producers, consumers, partitions, consumer groups, and message offsets.
+This project is developed to understand and explore the internals of distributed messaging systems like Kafka including producers, consumers, partitions, consumer groups, and message offsets.
 
 ---
 
