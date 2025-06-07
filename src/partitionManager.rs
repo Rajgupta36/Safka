@@ -21,16 +21,6 @@ impl PartitionManager {
     pub fn get_partition(&self, id: PartitionId) -> Option<Arc<Mutex<CircularBuffer>>> {
         self.partitions.get(&id).cloned()
     }
-    pub fn add_partition(&mut self, id: PartitionId, capacity: usize) -> bool {
-        if !self.partitions.contains_key(&id) {
-            self.partitions
-                .insert(id, Arc::new(Mutex::new(CircularBuffer::new(capacity))));
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn total_partitions(&self) -> usize {
         self.partitions.len()
     }

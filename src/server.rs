@@ -2,6 +2,7 @@ use crate::groups::ConsumerGroupManager;
 use crate::handler::handle_client;
 use crate::partitionManager::PartitionManager;
 
+use std::io;
 use std::sync::{atomic::AtomicUsize, Arc};
 use tokio::sync::broadcast;
 use tokio::{net::TcpListener, sync::Mutex};
@@ -11,8 +12,22 @@ pub async fn start_server() -> anyhow::Result<()> {
     println!("Listening on 0.0.0.0:9000");
 
     let (tx, _rx) = broadcast::channel::<String>(100);
-    //by default we providing 2 partitions
-    let partition_manager = Arc::new(Mutex::new(PartitionManager::new(2, 100)));
+    println!("Enter the number of partitions (must be less than 6):");
+    let mut partitions_input = String::new();
+    io::stdin().read_line(&mut partitions_input)?;
+    let partitions: usize = partitions_input.trim().parse()?;
+    if partitions >= 6 {
+        return Err(anyhow::anyhow!("Number of partitions must be less than 6"));
+    }
+
+    println!("Enter the partition size:");
+    let mut partition_size_input = String::new();
+    io::stdin().read_line(&mut partition_size_input)?;
+    let partition_size: usize = partition_size_input.trim().parse()?;
+    let partition_manager = Arc::new(Mutex::new(PartitionManager::new(
+        partitions,
+        partition_size,
+    )));
     let consumer_group_manager = Arc::new(Mutex::new(ConsumerGroupManager::new(
         partition_manager.lock().await.total_partitions(),
     )));
